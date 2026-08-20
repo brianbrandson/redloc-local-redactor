@@ -1,0 +1,22 @@
+title = "redloc gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "synthetic fixtures and local generated files"
+paths = [
+  '''(?:^|/)__pycache__(?:/.*)?$''',
+  '''(?:^|/)\.pytest_cache(?:/.*)?$''',
+  '''(?:^|/)dist(?:/.*)?$''',
+  '''(?:^|/)build(?:/.*)?$''',
+  '''(?:^|/)spikes(?:/.*)?$''',
+  '''(?:^|/)dogfooding/runs(?:/.*)?$''',
+]
+regexes = [
+  '''(?i)synthetic[-_a-z0-9]*''',
+  '''(?i)demo-(?:user|pass)''',
+  '''(?i)plainSyntheticSecret[0-9]+''',
+  '''(?i)redacted''',
+  '''\*\*\*''',
+]

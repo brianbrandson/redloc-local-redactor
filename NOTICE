@@ -1,0 +1,12 @@
+redloc
+Copyright 2026 redloc contributors
+
+redloc is a local-first redaction CLI.
+
+The project may include synthetic benchmark fixtures and documentation examples.
+These are for testing and demonstration only and must not contain real client data,
+real secrets, or engagement evidence.
+
+Third-party projects mentioned in documentation or benchmarks remain under their
+own licenses. They are not bundled as runtime dependencies unless explicitly
+listed in project metadata.

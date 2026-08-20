@@ -1,0 +1,32 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Python environments and package metadata
+.venv/
+*.egg-info/
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Local dogfood/output scratch
+dogfooding/runs/
+*.redacted
+*-redacted.txt
+
+# Local secrets / ad-hoc files
+*.env
+.env
+*.secret
+*.token
+
+# OS/editor
+.DS_Store
+*.swp

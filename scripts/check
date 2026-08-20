@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+run() {
+  printf '\n$ %s\n' "$*"
+  "$@"
+}
+
+run uv run --with pytest python -m pytest -q
+run uv run redloc-benchmark --suite all --tool local
+run uvx ruff check .
+run uvx --from 'bandit[toml]' bandit -c pyproject.toml -r redactor -q
+run gitleaks detect --source . --no-git --config .gitleaks.toml --redact --verbose --no-banner
+run git diff --check
+run uv build

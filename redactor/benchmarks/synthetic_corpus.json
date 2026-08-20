@@ -1,0 +1,201 @@
+[
+  {
+    "id": "plain-email",
+    "input": "Contact jane.doe@example.com for the update.\n",
+    "must_redact": [
+      "jane.doe@example.com"
+    ],
+    "must_contain": [],
+    "suites": [
+      "baseline"
+    ]
+  },
+  {
+    "id": "plain-phone",
+    "input": "Call +1 202-555-0184 after the meeting.\n",
+    "must_redact": [
+      "+1 202-555-0184"
+    ],
+    "must_contain": [],
+    "suites": [
+      "baseline"
+    ]
+  },
+  {
+    "id": "plain-api-key",
+    "input": "api_key=plainSyntheticSecret1234567890\n",
+    "must_redact": [
+      "plainSyntheticSecret1234567890"
+    ],
+    "must_contain": [],
+    "suites": [
+      "baseline"
+    ]
+  },
+  {
+    "id": "plain-bearer-token",
+    "input": "Authorization: Bearer plainSyntheticBearer1234567890\n",
+    "must_redact": [
+      "plainSyntheticBearer1234567890"
+    ],
+    "must_contain": [],
+    "suites": [
+      "baseline"
+    ]
+  },
+  {
+    "id": "email-token-url-query",
+    "input": "GET https://app.example.test/api/v1/users?email=jane.doe@example.com&ticket=123\napi_key=synthetic-api-key-value-12345\n",
+    "must_redact": [
+      "app.example.test",
+      "jane.doe@example.com",
+      "synthetic-api-key-value-12345"
+    ],
+    "must_contain": [
+      "https://[HOST_1]/api/v1/users?email=[EMAIL_1]&ticket=123",
+      "api_key=[TOKEN_1]"
+    ],
+    "suites": [
+      "operator"
+    ]
+  },
+  {
+    "id": "client-terms-and-internal-ip",
+    "input": "ExampleCo owns Project Squirrel at 10.42.7.15\n",
+    "client_terms": [
+      "ExampleCo",
+      "Project Squirrel"
+    ],
+    "must_redact": [
+      "ExampleCo",
+      "Project Squirrel",
+      "10.42.7.15"
+    ],
+    "must_contain": [
+      "[CLIENT_2] owns [CLIENT_1] at [INTERNAL_IP_1]"
+    ],
+    "suites": [
+      "operator",
+      "project-operator"
+    ]
+  },
+  {
+    "id": "public-ip-and-uuid",
+    "input": "Public 203.0.113.44 request id 4c9f2c6d-4d19-4d07-a34f-8aa2b3d9f111\n",
+    "must_redact": [
+      "203.0.113.44",
+      "4c9f2c6d-4d19-4d07-a34f-8aa2b3d9f111"
+    ],
+    "must_contain": [
+      "[PUBLIC_IP_1]",
+      "[UUID_1]"
+    ],
+    "suites": [
+      "operator"
+    ]
+  },
+  {
+    "id": "http-request-headers-and-cookies",
+    "input": "POST https://portal.example.test/api/v2/reset?redirect=/dashboard HTTP/1.1\nHost: portal.example.test\nAuthorization: Bearer syntheticBearerToken1234567890\nCookie: sessionid=7f4c6b2d9efab77112233445566778899; csrftoken=abcdef1234567890abcdef1234567890\nX-Forwarded-For: 10.42.7.15\n\nemail=jane.doe@example.com\n",
+    "must_redact": [
+      "portal.example.test",
+      "syntheticBearerToken1234567890",
+      "7f4c6b2d9efab77112233445566778899",
+      "abcdef1234567890abcdef1234567890",
+      "10.42.7.15",
+      "jane.doe@example.com"
+    ],
+    "must_contain": [
+      "POST https://[HOST_1]/api/v2/reset?redirect=/dashboard HTTP/1.1",
+      "Host: [HOST_1]",
+      "Authorization: Bearer [TOKEN_1]",
+      "Cookie: sessionid=[COOKIE_1]; csrftoken=[COOKIE_2]",
+      "X-Forwarded-For: [INTERNAL_IP_1]",
+      "email=[EMAIL_1]"
+    ],
+    "suites": [
+      "operator"
+    ]
+  },
+  {
+    "id": "caido-style-request-summary",
+    "input": "Caido replay: GET https://admin.example.test/api/v1/orgs/ExampleCo/users/jane.doe@example.com?token=abc123&id=4c9f2c6d-4d19-4d07-a34f-8aa2b3d9f111 returned 302 to https://sso.example.test/login\n",
+    "client_terms": [
+      "ExampleCo"
+    ],
+    "must_redact": [
+      "admin.example.test",
+      "sso.example.test",
+      "ExampleCo",
+      "jane.doe@example.com",
+      "abc123",
+      "4c9f2c6d-4d19-4d07-a34f-8aa2b3d9f111"
+    ],
+    "must_contain": [
+      "GET https://[HOST_1]/api/v1/orgs/[CLIENT_1]/users/[EMAIL_1]?token=[TOKEN_1]&id=[UUID_1] returned 302 to https://[HOST_2]/login"
+    ],
+    "suites": [
+      "operator",
+      "project-operator"
+    ]
+  },
+  {
+    "id": "local-workspace-paths",
+    "input": "Saved raw notes at /workspace/example-project/ExampleCo/raw.txt and /home/exampleuser/client/ExampleCo/secrets.env\n",
+    "client_terms": [
+      "ExampleCo"
+    ],
+    "must_redact": [
+      "/workspace/example-project/ExampleCo/raw.txt",
+      "/home/exampleuser/client/ExampleCo/secrets.env",
+      "ExampleCo"
+    ],
+    "must_contain": [
+      "[PATH_1]",
+      "[PATH_2]"
+    ],
+    "suites": [
+      "operator",
+      "project-operator"
+    ]
+  },
+  {
+    "id": "operator-contact-and-phone-notes",
+    "input": "Follow up with Jane Doe <jane.doe@example.com>, LT +370 612 34567, UK +44 20 7946 0958, ticket HELP-1234 for ExampleCo\n",
+    "client_terms": [
+      "ExampleCo"
+    ],
+    "must_redact": [
+      "jane.doe@example.com",
+      "+370 612 34567",
+      "+44 20 7946 0958",
+      "ExampleCo"
+    ],
+    "must_contain": [
+      "Jane Doe <[EMAIL_1]>",
+      "LT [PHONE_1]",
+      "UK [PHONE_2]",
+      "for [CLIENT_1]"
+    ],
+    "suites": [
+      "operator",
+      "project-operator"
+    ]
+  },
+  {
+    "id": "bearer-and-basic-auth",
+    "input": "curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.syntheticpayload.syntheticSignaturePart' https://demo-user:demo-pass@app.example.test/private\n",
+    "must_redact": [
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.syntheticpayload.syntheticSignaturePart",
+      "demo-user:demo-pass",
+      "app.example.test"
+    ],
+    "must_contain": [
+      "Authorization: Bearer [TOKEN_1]",
+      "https://[TOKEN_2]@[HOST_1]/private"
+    ],
+    "suites": [
+      "operator"
+    ]
+  }
+]

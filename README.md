@@ -124,6 +124,7 @@ Public/cloud AI endpoints are refused by default.
 
 ## More examples
 
+- `CHANGELOG.md` - public-alpha release notes, including raw-reveal boundary changes.
 - `docs/operator/workflows.md` - synthetic Caido-style notes, profiles, sessions, AI suggestions, and bring-your-own benchmark corpora.
 - `docs/operator/benchmark.md` - benchmark usage, suites, output fields, and synthetic corpus format.
 - `docs/operator/tty-list-ui.md` - terminal list controls for profiles, terms, ignored suggestions, detectors, and sessions.
@@ -197,7 +198,8 @@ Common flags:
 - `--detector-list` with `--detector-disable DETECTOR` / `--detector-enable DETECTOR` controls built-in detectors for a profile.
 - `--manual-detector-add`, `--manual-detector-list`, `--manual-detector-disable`, `--manual-detector-enable`, and `--manual-detector-remove` manage operator-defined placeholder classes for explicit terms.
 - `--session-init NAME`, `--session-select NAME`, `--session NAME`, `--session-clear`, `--session-status`, `--session-list`, and `--session-delete NAME` manage persistent placeholder sessions.
-- `--show-secret PLACEHOLDER` reveals one local session mapping.
+- `--restore` restores exact placeholders in pasted/file input from the active or explicit local session. It intentionally prints raw mapped values locally and only works for placeholders stored in that session.
+- `--show-secret PLACEHOLDER` reveals one local session mapping and intentionally prints the raw value to stdout.
 - `--show-secret-all` reveals all mappings for the active/current session and intentionally prints raw mapped values locally.
 - `--ai-check` asks a local/private model for contextual leak warnings after deterministic redaction.
 - `--ai-suggest` opens the local/private suggestion review workflow.
@@ -222,6 +224,7 @@ Bug reports, false-positive examples, and missed-redaction reports are also usef
 - Deterministic-first: regex, structured detectors, and explicit terms are the main redaction path.
 - Review-required: redaction is not a guarantee. Operators must inspect output before sharing.
 - Sessions retain raw mappings locally by design. Use them only when stable labels are worth the retention.
+- `--restore`, `--show-secret`, and `--show-secret-all` are intentional raw-reveal actions. Treat terminal scrollback, shell captures, recordings, copy/paste buffers, and restored `--out` files as raw-sensitive; restored files are not redacted output.
 - AI review is optional and local/private by default. It is a review layer, not proof of safety.
 - Tests, examples, benchmarks, and public docs must use synthetic data only.
 

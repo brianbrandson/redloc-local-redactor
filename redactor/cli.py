@@ -60,6 +60,7 @@ PLACEHOLDER_OR_MASK_RE = re.compile(
     r"\[[A-Z_]+_\d+\]|\*\*\*|\[(?:[A-Z_]+\s+)?REDACTED\]|<redacted>|\bREDACTED\b",
     re.IGNORECASE,
 )
+RESTORE_PLACEHOLDER_RE = re.compile(r"\[([A-Z_]+)_(\d+)\]")
 REDACTED_ASSIGNMENT_SECRET_RE = re.compile(
     r"(?i)\b(api[_-]?key|secret|client[_-]?secret|password|token)[ \t]*[:=][ \t]*(?:\[[A-Z_]+_\d+\]|\*\*\*|\[(?:[A-Z_]+\s+)?REDACTED\]|<redacted>|\bREDACTED\b)"
 )
@@ -1242,6 +1243,31 @@ def show_mapping(session: SessionData, selector: str) -> list[str]:
 
 def show_all_mappings(session: SessionData) -> list[str]:
     return _format_mapping_lines([(placeholder, value) for (_kind, value), placeholder in session.vault.values.items()])
+
+
+def restore_session_placeholders(text: str, session: SessionData) -> tuple[str, dict[str, int], list[str]]:
+    values_by_placeholder = {
+        placeholder: (kind, value)
+        for (kind, value), placeholder in session.vault.values.items()
+    }
+    counts: dict[str, int] = {}
+    unknown: list[str] = []
+    seen_unknown: set[str] = set()
+
+    def replace_match(match: Match[str]) -> str:
+        placeholder = match.group(0)
+        normalized = placeholder.strip("[]")
+        mapped = values_by_placeholder.get(placeholder)
+        if not mapped:
+            if normalized not in seen_unknown:
+                seen_unknown.add(normalized)
+                unknown.append(normalized)
+            return placeholder
+        kind, value = mapped
+        counts[kind] = counts.get(kind, 0) + 1
+        return value
+
+    return RESTORE_PLACEHOLDER_RE.sub(replace_match, text), counts, unknown
 
 
 def append_terms(path: Path, raw_terms: str) -> int:
@@ -3396,6 +3422,7 @@ def build_parser() -> argparse.ArgumentParser:
     sessions.add_argument("--session-list", dest="list_sessions", action="store_true", help="list saved sessions with raw-free counts; in a TTY, pick one to select")
     sessions.add_argument("--session-status", dest="map_status", action="store_true", help="show raw-free counts for the active/current session")
     sessions.add_argument("--session-delete", dest="delete_session", metavar="NAME", help="permanently delete saved mappings for NAME")
+    reveal.add_argument("--restore", action="store_true", help="restore placeholders from the active/current session; intentionally prints raw values locally")
     reveal.add_argument("--show-secret", dest="show_secret", metavar="PLACEHOLDER", help="reveal the local value behind PLACEHOLDER for the active/current session")
     reveal.add_argument("--show-secret-all", dest="show_secret_all", action="store_true", help="reveal every placeholder mapping for the active/current session")
     advanced.add_argument(
@@ -3415,17 +3442,177 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+RESTORE_ALLOWED_FLAGS = {
+    "--restore",
+    "--session",
+    "--session-dir",
+    "--session-state-file",
+    "--in",
+    "--out",
+    "--force",
+    "--summary",
+}
+
+REVEAL_ALLOWED_FLAGS = {
+    "--show-secret",
+    "--show-secret-all",
+    "--session",
+    "--session-dir",
+    "--session-state-file",
+}
+
+
+def _flag_name(token: str) -> str:
+    return token.split("=", 1)[0]
+
+
+def unsupported_restore_flag(args: argparse.Namespace, raw_argv: Sequence[str]) -> str | None:
+    action_flags = (
+        (args.about, "--about"),
+        (bool(args.term), "--term"),
+        (bool(args.term_file), "--term-file"),
+        (bool(args.ignore_file), "--ignore-file"),
+        (bool(args.term_file_template), "--term-file-template"),
+        (bool(args.init_profile), "--profile-init"),
+        (bool(args.select_profile), "--profile-select"),
+        (args.profile_list, "--profile-list"),
+        (args.copy, "--copy"),
+        (args.interactive, "--interactive"),
+        (args.copy_enable, "--copy-enable"),
+        (args.copy_disable, "--copy-disable"),
+        (args.copy_status, "--copy-status"),
+        (args.add_term, "--profile-term-add"),
+        (args.terms_list, "--profile-term-list"),
+        (bool(args.term_remove), "--profile-term-remove"),
+        (args.global_term_add, "--global-term-add"),
+        (args.global_term_list, "--global-term-list"),
+        (bool(args.global_term_remove), "--global-term-remove"),
+        (args.ignore_add, "--ignore-add"),
+        (bool(args.ignore_remove), "--ignore-remove"),
+        (args.ignore_list, "--ignore-list"),
+        (args.detector_list, "--detector-list"),
+        (bool(args.detector_disable), "--detector-disable"),
+        (bool(args.detector_enable), "--detector-enable"),
+        (args.manual_detector_list, "--manual-detector-list"),
+        (args.manual_detector_add, "--manual-detector-add"),
+        (bool(args.manual_detector_remove), "--manual-detector-remove"),
+        (bool(args.manual_detector_disable), "--manual-detector-disable"),
+        (bool(args.manual_detector_enable), "--manual-detector-enable"),
+        (args.check_only, "--check-only"),
+        (args.no_redact, "--no-redact"),
+        (args.ai_check, "--ai-check"),
+        (args.ai_suggest, "--ai-suggest"),
+        (bool(args.ai_config_set), "--ai-config-set"),
+        (args.ai_config_status, "--ai-config-status"),
+        (args.ai_config_clear, "--ai-config-clear"),
+        (args.auto_out, "--auto-out"),
+        (args.timestamp, "--timestamp"),
+        (bool(args.report), "--report"),
+        (bool(args.init_session), "--session-init"),
+        (args.select_session is not None, "--session-select"),
+        (args.clear_session, "--session-clear"),
+        (args.list_sessions, "--session-list"),
+        (args.map_status, "--session-status"),
+        (bool(args.delete_session), "--session-delete"),
+        (bool(args.show_secret), "--show-secret"),
+        (args.show_secret_all, "--show-secret-all"),
+    )
+    for enabled, flag in action_flags:
+        if enabled:
+            return flag
+    for token in raw_argv:
+        if token.startswith("--") and _flag_name(token) not in RESTORE_ALLOWED_FLAGS:
+            return _flag_name(token)
+    return None
+
+
+def unsupported_reveal_flag(args: argparse.Namespace, raw_argv: Sequence[str]) -> str | None:
+    action_flags = (
+        (args.about, "--about"),
+        (args.restore, "--restore"),
+        (bool(args.term), "--term"),
+        (bool(args.term_file), "--term-file"),
+        (bool(args.ignore_file), "--ignore-file"),
+        (bool(args.term_file_template), "--term-file-template"),
+        (bool(args.init_profile), "--profile-init"),
+        (bool(args.select_profile), "--profile-select"),
+        (args.profile_list, "--profile-list"),
+        (args.copy, "--copy"),
+        (args.interactive, "--interactive"),
+        (args.copy_enable, "--copy-enable"),
+        (args.copy_disable, "--copy-disable"),
+        (args.copy_status, "--copy-status"),
+        (args.add_term, "--profile-term-add"),
+        (args.terms_list, "--profile-term-list"),
+        (bool(args.term_remove), "--profile-term-remove"),
+        (args.global_term_add, "--global-term-add"),
+        (args.global_term_list, "--global-term-list"),
+        (bool(args.global_term_remove), "--global-term-remove"),
+        (args.ignore_add, "--ignore-add"),
+        (bool(args.ignore_remove), "--ignore-remove"),
+        (args.ignore_list, "--ignore-list"),
+        (args.detector_list, "--detector-list"),
+        (bool(args.detector_disable), "--detector-disable"),
+        (bool(args.detector_enable), "--detector-enable"),
+        (args.manual_detector_list, "--manual-detector-list"),
+        (args.manual_detector_add, "--manual-detector-add"),
+        (bool(args.manual_detector_remove), "--manual-detector-remove"),
+        (bool(args.manual_detector_disable), "--manual-detector-disable"),
+        (bool(args.manual_detector_enable), "--manual-detector-enable"),
+        (args.check_only, "--check-only"),
+        (args.no_redact, "--no-redact"),
+        (args.ai_check, "--ai-check"),
+        (args.ai_suggest, "--ai-suggest"),
+        (bool(args.ai_config_set), "--ai-config-set"),
+        (args.ai_config_status, "--ai-config-status"),
+        (args.ai_config_clear, "--ai-config-clear"),
+        (args.auto_out, "--auto-out"),
+        (args.timestamp, "--timestamp"),
+        (bool(args.output_file), "--out"),
+        (args.force, "--force"),
+        (args.summary, "--summary"),
+        (bool(args.report), "--report"),
+        (bool(args.init_session), "--session-init"),
+        (args.select_session is not None, "--session-select"),
+        (args.clear_session, "--session-clear"),
+        (args.list_sessions, "--session-list"),
+        (args.map_status, "--session-status"),
+        (bool(args.delete_session), "--session-delete"),
+    )
+    for enabled, flag in action_flags:
+        if enabled:
+            return flag
+    for token in raw_argv:
+        if token.startswith("--") and _flag_name(token) not in REVEAL_ALLOWED_FLAGS:
+            return _flag_name(token)
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_argv = sys.argv[1:] if argv is None else argv
     args = build_parser().parse_args(argv)
-    if args.about:
-        sys.stdout.write(ABOUT_TEXT)
-        return 0
     config_was_explicit = "--config" in raw_argv
     config_existed_before_profile_resolution = args.config.expanduser().exists()
     selected_profile_before_resolution = (
         args.state_file.read_text(encoding="utf-8").strip() if args.state_file.exists() else ""
     )
+    if args.restore:
+        unsupported = unsupported_restore_flag(args, raw_argv)
+        if unsupported:
+            print(f"error: --restore cannot be used with {unsupported}", file=sys.stderr)
+            return 2
+    if args.show_secret and args.show_secret_all:
+        print("error: use either --show-secret or --show-secret-all, not both", file=sys.stderr)
+        return 2
+    if args.show_secret or args.show_secret_all:
+        unsupported = unsupported_reveal_flag(args, raw_argv)
+        if unsupported:
+            reveal_flag = "--show-secret-all" if args.show_secret_all else "--show-secret"
+            print(f"error: {reveal_flag} cannot be used with {unsupported}", file=sys.stderr)
+            return 2
+    if args.about:
+        sys.stdout.write(ABOUT_TEXT)
+        return 0
     if args.auto_out and args.output_file:
         print("error: use either --auto-out or --out, not both", file=sys.stderr)
         return 2
@@ -3455,9 +3642,6 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.interactive and args.ignore_add:
         print("error: use either --interactive or --ignore-add, not both", file=sys.stderr)
-        return 2
-    if args.show_secret and args.show_secret_all:
-        print("error: use either --show-secret or --show-secret-all, not both", file=sys.stderr)
         return 2
     selected_profile_list_count = sum(
         bool(flag)
@@ -3754,6 +3938,49 @@ def main(argv: list[str] | None = None) -> int:
         else:
             for line in show_mapping(session_data, args.show_secret):
                 print(line)
+        return 0
+
+    if args.restore:
+        if not session_data:
+            print("error: --restore needs an active session or --session NAME", file=sys.stderr)
+            return 2
+        try:
+            if args.input_file:
+                text = args.input_file.expanduser().read_text(encoding="utf-8")
+            else:
+                if _stdin_is_tty():
+                    print(f"Paste placeholder text to restore. Finish with {_eof_hint()}.", file=sys.stderr)
+                    print("Restored raw values print to stdout unless --out is used.", file=sys.stderr)
+                text = sys.stdin.read()
+        except KeyboardInterrupt:
+            print("cancelled", file=sys.stderr)
+            return 130
+        except OSError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        output, restore_counts, unknown_placeholders = restore_session_placeholders(text, session_data)
+        warnings = [f"unknown placeholder {placeholder}" for placeholder in unknown_placeholders]
+        print(f"session: {session_data.name}", file=sys.stderr)
+        output_file = args.output_file
+        output_file_is_directory = False
+        if output_file:
+            output_file, output_file_is_directory = explicit_output_path(output_file, input_file=args.input_file)
+            if output_file.exists() and not args.force:
+                print(f"error: refusing to overwrite existing output file: {output_file}; pass --force", file=sys.stderr)
+                return 2
+            try:
+                _write_private_text(output_file, output)
+            except OSError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+            if output_file_is_directory:
+                print(f"wrote restored output to {output_file}", file=sys.stderr)
+        else:
+            sys.stdout.write(output)
+        for warning in warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+        if args.summary:
+            print(format_summary(restore_counts, warnings), file=sys.stderr)
         return 0
 
     terms = list(args.term)

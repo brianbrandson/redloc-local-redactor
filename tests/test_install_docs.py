@@ -22,6 +22,8 @@ def test_install_docs_cover_operator_install_paths_and_smokes():
     assert "For actual workflows, see `docs/operator/workflows.md`" in content
     assert "uv tool uninstall local-redactor || true" in content
     assert "~/.config/redloc/" in content
+    assert "CHANGELOG.md" in content
+    assert "Raw-reveal warning" in content
 
 
 def test_readme_points_first_time_users_to_install_docs():
@@ -34,6 +36,7 @@ def test_readme_points_operators_to_workflow_examples():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "docs/operator/workflows.md" in readme
+    assert "CHANGELOG.md" in readme
     assert "docs/operator/benchmark.md" in readme
     assert "docs/operator/tty-list-ui.md" in readme
     assert "docs/testing.md" in readme
@@ -93,9 +96,11 @@ def test_readme_points_operators_to_current_ai_workflow():
     assert "--ai-suggest" in _command_reference(readme)
     assert "local/private suggestion review workflow" in _command_reference(readme)
     assert "--session-init NAME" in _command_reference(readme)
+    assert "--restore" in _command_reference(readme)
     assert "--show-secret PLACEHOLDER" in _command_reference(readme)
     assert "--show-secret-all" in _command_reference(readme)
     assert "intentionally prints raw mapped values locally" in _command_reference(readme)
+    assert "terminal scrollback" in _safety_model(readme)
     assert "--profile-term-remove TERM" in _command_reference(readme)
     assert "--ignore-remove TERM" in _command_reference(readme)
     assert "--detector-list" in _command_reference(readme)

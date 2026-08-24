@@ -9,6 +9,8 @@ Status: alpha. Redaction is not a guarantee; review output before sharing it.
 
 Raw input stays local by default. Normal paste/file input is not saved. Persistent sessions are the explicit exception: they store raw matched values locally so placeholder labels can stay stable across runs.
 
+Release notes live in `CHANGELOG.md`.
+
 ## Requirements
 
 - Python 3.10+
@@ -121,6 +123,8 @@ uv tool uninstall redloc
 ```
 
 This removes the installed commands. It does not delete local profiles, terms, ignored suggestions, redacted outputs, settings, or session mappings.
+
+Raw-reveal warning: `--restore`, `--show-secret`, and `--show-secret-all` intentionally expose stored raw values. Treat terminal scrollback, recordings, shell captures/redirection, copied terminal text, and restored output files as raw-sensitive. A restored file is not redacted output.
 
 Typical local data paths:
 

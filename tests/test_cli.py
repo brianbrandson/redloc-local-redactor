@@ -3226,6 +3226,219 @@ def test_cli_session_tools_status_show_list_clear_and_forget(tmp_path: Path):
     assert forget.stdout == "deleted session: acme-webapp\n"
 
 
+def test_restore_session_placeholders_replaces_exact_known_placeholders():
+    vault = cli_module.PlaceholderVault()
+    host_placeholder = vault.placeholder_for("HOST", "app.example.test")
+    token_placeholder = vault.placeholder_for("TOKEN", "synthetic-api-key-value-12345")
+    session = cli_module.SessionData(name="acme-webapp", vault=vault, path=Path("unused.json"))
+
+    restored, counts, unknown = cli_module.restore_session_placeholders(
+        f"curl https://{host_placeholder}/api -H 'Authorization: Bearer {token_placeholder}'",
+        session,
+    )
+
+    assert restored == "curl https://app.example.test/api -H 'Authorization: Bearer synthetic-api-key-value-12345'"
+    assert counts == {"HOST": 1, "TOKEN": 1}
+    assert unknown == []
+
+
+def test_cli_restore_uses_selected_session_without_dumping_mapping(tmp_path: Path):
+    state_file = tmp_path / "current-session"
+    session_dir = tmp_path / "sessions"
+    base = [sys.executable, "-m", "redactor.cli", "--session-state-file", str(state_file), "--session-dir", str(session_dir)]
+    subprocess.run(base + ["--session-init", "acme-webapp"], text=True, capture_output=True, check=True)
+    subprocess.run(
+        base,
+        input="Open https://app.example.test/login and api_key=synthetic-api-key-value-12345\n",
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    proc = subprocess.run(
+        base + ["--restore", "--summary"],
+        input='curl https://[HOST_1]/api -H "Authorization: Bearer [TOKEN_1]"\n',
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert proc.stdout == 'curl https://app.example.test/api -H "Authorization: Bearer synthetic-api-key-value-12345"\n'
+    assert proc.stderr == "session: acme-webapp\nsummary: HOST=1 TOKEN=1 warnings=none\n"
+    assert "[HOST_1] =" not in proc.stdout + proc.stderr
+    assert "[TOKEN_1] =" not in proc.stdout + proc.stderr
+
+
+def test_cli_restore_explicit_session_does_not_change_selected_session(tmp_path: Path):
+    state_file = tmp_path / "current-session"
+    session_dir = tmp_path / "sessions"
+    base = [sys.executable, "-m", "redactor.cli", "--session-state-file", str(state_file), "--session-dir", str(session_dir)]
+    subprocess.run(base + ["--session-init", "first"], text=True, capture_output=True, check=True)
+    subprocess.run(base, input="Open https://first.example.test/login\n", text=True, capture_output=True, check=True)
+    subprocess.run(base + ["--session-init", "second"], text=True, capture_output=True, check=True)
+    subprocess.run(base, input="Open https://second.example.test/login\n", text=True, capture_output=True, check=True)
+
+    proc = subprocess.run(
+        base + ["--session", "first", "--restore"],
+        input="curl https://[HOST_1]/api\n",
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert proc.stdout == "curl https://first.example.test/api\n"
+    assert proc.stderr == "session: first\n"
+    assert state_file.read_text(encoding="utf-8") == "second\n"
+
+
+def test_cli_restore_leaves_unknown_placeholders_and_warns_raw_free(tmp_path: Path):
+    state_file = tmp_path / "current-session"
+    session_dir = tmp_path / "sessions"
+    base = [sys.executable, "-m", "redactor.cli", "--session-state-file", str(state_file), "--session-dir", str(session_dir)]
+    subprocess.run(base + ["--session-init", "acme-webapp"], text=True, capture_output=True, check=True)
+    subprocess.run(
+        base,
+        input="Open https://app.example.test/login and api_key=synthetic-api-key-value-12345\n",
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    proc = subprocess.run(
+        base + ["--restore", "--summary"],
+        input='curl https://[HOST_99]/api -H "Authorization: Bearer [TOKEN_1]"\n',
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert proc.stdout == 'curl https://[HOST_99]/api -H "Authorization: Bearer synthetic-api-key-value-12345"\n'
+    assert proc.stderr == "session: acme-webapp\nwarning: unknown placeholder HOST_99\nsummary: TOKEN=1 warnings=unknown placeholder HOST_99\n"
+    assert "app.example.test" not in proc.stderr
+    assert "synthetic-api-key-value-12345" not in proc.stderr
+
+
+def test_cli_restore_reads_input_file_writes_output_and_honors_overwrite_guard(tmp_path: Path):
+    state_file = tmp_path / "current-session"
+    session_dir = tmp_path / "sessions"
+    input_file = tmp_path / "ai-script.sh"
+    output_file = tmp_path / "restored.sh"
+    base = [sys.executable, "-m", "redactor.cli", "--session-state-file", str(state_file), "--session-dir", str(session_dir)]
+    subprocess.run(base + ["--session-init", "acme-webapp"], text=True, capture_output=True, check=True)
+    subprocess.run(base, input="Open https://app.example.test/login\n", text=True, capture_output=True, check=True)
+    input_file.write_text("curl https://[HOST_1]/api\n", encoding="utf-8")
+
+    first = subprocess.run(
+        base + ["--restore", "--in", str(input_file), "--out", str(output_file)],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    refused = subprocess.run(
+        base + ["--restore", "--in", str(input_file), "--out", str(output_file)],
+        text=True,
+        capture_output=True,
+    )
+    forced = subprocess.run(
+        base + ["--restore", "--in", str(input_file), "--out", str(output_file), "--force"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert first.stdout == ""
+    assert first.stderr == "session: acme-webapp\n"
+    assert output_file.read_text(encoding="utf-8") == "curl https://app.example.test/api\n"
+    assert os.stat(output_file).st_mode & 0o777 == 0o600
+    assert refused.returncode == 2
+    assert refused.stdout == ""
+    assert "refusing to overwrite existing output file" in refused.stderr
+    assert forced.stdout == ""
+    assert forced.stderr == "session: acme-webapp\n"
+
+
+def test_cli_restore_without_session_exits_with_error(tmp_path: Path):
+    state_file = tmp_path / "current-session"
+    session_dir = tmp_path / "sessions"
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "redactor.cli",
+            "--session-state-file",
+            str(state_file),
+            "--session-dir",
+            str(session_dir),
+            "--restore",
+        ],
+        input="curl https://[HOST_1]/api\n",
+        text=True,
+        capture_output=True,
+    )
+
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert proc.stderr == "error: --restore needs an active session or --session NAME\n"
+
+
+def test_cli_restore_rejects_session_delete_before_state_mutation(tmp_path: Path):
+    state_file = tmp_path / "current-session"
+    session_dir = tmp_path / "sessions"
+    base = [sys.executable, "-m", "redactor.cli", "--session-state-file", str(state_file), "--session-dir", str(session_dir)]
+    subprocess.run(base + ["--session-init", "acme-webapp"], text=True, capture_output=True, check=True)
+    subprocess.run(base, input="Open https://app.example.test/login\n", text=True, capture_output=True, check=True)
+
+    proc = subprocess.run(
+        base + ["--restore", "--session-delete", "acme-webapp"],
+        input="curl https://[HOST_1]/api\n",
+        text=True,
+        capture_output=True,
+    )
+    still_restores = subprocess.run(
+        base + ["--restore"],
+        input="curl https://[HOST_1]/api\n",
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert "--restore cannot be used with --session-delete" in proc.stderr
+    assert still_restores.stdout == "curl https://app.example.test/api\n"
+
+
+def test_cli_restore_rejects_copy_control_before_settings_mutation(tmp_path: Path):
+    state_file = tmp_path / "current-session"
+    session_dir = tmp_path / "sessions"
+    settings_file = tmp_path / "settings.ini"
+    base = [
+        sys.executable,
+        "-m",
+        "redactor.cli",
+        "--settings",
+        str(settings_file),
+        "--session-state-file",
+        str(state_file),
+        "--session-dir",
+        str(session_dir),
+    ]
+    subprocess.run(base + ["--session-init", "acme-webapp"], text=True, capture_output=True, check=True)
+
+    proc = subprocess.run(
+        base + ["--restore", "--copy-disable"],
+        input="curl https://[HOST_1]/api\n",
+        text=True,
+        capture_output=True,
+    )
+
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert "--restore cannot be used with --copy-disable" in proc.stderr
+    assert not settings_file.exists()
+
+
 def test_cli_help_groups_everyday_workflows_and_start_here_examples():
     proc = subprocess.run([sys.executable, "-m", "redactor.cli", "--help"], text=True, capture_output=True, check=True)
 
@@ -3246,6 +3459,8 @@ def test_cli_help_groups_everyday_workflows_and_start_here_examples():
     assert "--session-select" in proc.stdout
     assert "--session-init" in proc.stdout
     assert "--session-clear" in proc.stdout
+    assert "--restore" in proc.stdout
+    assert "restore placeholders" in proc.stdout
     assert "--profile-term-add" in proc.stdout
     assert "--profile-term-list" in proc.stdout
     assert "--profile-term-remove" in proc.stdout
@@ -3783,6 +3998,81 @@ def test_cli_refuses_single_and_bulk_secret_reveal_together(tmp_path: Path):
     assert proc.returncode == 2
     assert proc.stdout == ""
     assert "use either --show-secret or --show-secret-all" in proc.stderr
+
+
+def test_cli_show_secret_rejects_session_delete_before_state_mutation(tmp_path: Path):
+    state_file = tmp_path / "current-session"
+    session_dir = tmp_path / "sessions"
+    base = [sys.executable, "-m", "redactor.cli", "--session-state-file", str(state_file), "--session-dir", str(session_dir)]
+    subprocess.run(base + ["--session-init", "acme-webapp"], text=True, capture_output=True, check=True)
+    subprocess.run(base, input="Open https://app.example.test/login\n", text=True, capture_output=True, check=True)
+
+    proc = subprocess.run(
+        base + ["--show-secret", "HOST_1", "--session-delete", "acme-webapp"],
+        text=True,
+        capture_output=True,
+    )
+    still_reveals = subprocess.run(base + ["--show-secret", "HOST_1"], text=True, capture_output=True, check=True)
+
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert "--show-secret cannot be used with --session-delete" in proc.stderr
+    assert still_reveals.stdout == "[HOST_1] = app.example.test\n"
+
+
+def test_cli_show_secret_all_rejects_copy_control_before_settings_mutation(tmp_path: Path):
+    state_file = tmp_path / "current-session"
+    session_dir = tmp_path / "sessions"
+    settings_file = tmp_path / "settings.ini"
+    base = [
+        sys.executable,
+        "-m",
+        "redactor.cli",
+        "--settings",
+        str(settings_file),
+        "--session-state-file",
+        str(state_file),
+        "--session-dir",
+        str(session_dir),
+    ]
+    subprocess.run(base + ["--session-init", "acme-webapp"], text=True, capture_output=True, check=True)
+
+    proc = subprocess.run(base + ["--show-secret-all", "--copy-disable"], text=True, capture_output=True)
+
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert "--show-secret-all cannot be used with --copy-disable" in proc.stderr
+    assert not settings_file.exists()
+
+
+def test_cli_show_secret_rejects_unrelated_actions_without_revealing_values(tmp_path: Path):
+    state_file = tmp_path / "current-session"
+    session_dir = tmp_path / "sessions"
+    config = tmp_path / "profiles.ini"
+    report = tmp_path / "report.json"
+    base = [sys.executable, "-m", "redactor.cli", "--session-state-file", str(state_file), "--session-dir", str(session_dir)]
+    subprocess.run(base + ["--session-init", "acme-webapp"], text=True, capture_output=True, check=True)
+    subprocess.run(base, input="Open https://app.example.test/login\n", text=True, capture_output=True, check=True)
+
+    cases = [
+        (["--show-secret", "HOST_1", "--copy"], "--copy"),
+        (["--show-secret", "HOST_1", "--interactive"], "--interactive"),
+        (["--show-secret", "HOST_1", "--ai-check", "--ai-endpoint", "http://127.0.0.1:9", "--ai-model", "local"], "--ai-check"),
+        (["--show-secret", "HOST_1", "--report", str(report)], "--report"),
+        (["--show-secret", "HOST_1", "--session-status"], "--session-status"),
+        (["--show-secret", "HOST_1", "--config", str(config), "--profile-init", "acme"], "--profile-init"),
+    ]
+
+    for extra_args, unsupported in cases:
+        proc = subprocess.run(base + extra_args, input="ignored\n", text=True, capture_output=True)
+
+        assert proc.returncode == 2, extra_args
+        assert proc.stdout == "", extra_args
+        assert f"--show-secret cannot be used with {unsupported}" in proc.stderr, extra_args
+        assert "app.example.test" not in proc.stdout + proc.stderr, extra_args
+
+    assert not report.exists()
+    assert not config.exists()
 
 
 def test_cli_session_mapping_file_is_user_only(tmp_path: Path):
